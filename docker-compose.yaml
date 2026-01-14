@@ -1,18 +1,392 @@
 services:
-  # ... существующие сервисы бэкенда ...
-  
-  frontend:
+  # Redis для Celery
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - bananza-network
+    volumes:
+      - redis-data:/data
+
+  # PostgreSQL для всех сервисов
+  postgres-user:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: user_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - bananza-network
+    volumes:
+      - postgres-user-data:/var/lib/postgresql/data
+
+  postgres-post:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: post_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    networks:
+      - bananza-network
+    volumes:
+      - postgres-post-data:/var/lib/postgresql/data
+
+  postgres-media:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: media_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    networks:
+      - bananza-network
+    volumes:
+      - postgres-media-data:/var/lib/postgresql/data
+
+  postgres-notification:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: notification_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    networks:
+      - bananza-network
+    volumes:
+      - postgres-notification-data:/var/lib/postgresql/data
+
+  postgres-moderation:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: moderation_service_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    networks:
+      - bananza-network
+    volumes:
+      - postgres-moderation-data:/var/lib/postgresql/data
+
+  # User Service
+  user-service:
     build:
-      context: ../laughing-bananza-frontend
+      context: ./services/user-service
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "8001:8001"
     environment:
-      - VITE_API_BASE_URL=http://api-gateway:8080/api
+      - DEBUG=True
+      - DB_NAME=user_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-user
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MEDIA_SERVICE_URL=http://media-service:8003
     depends_on:
-      - api-gateway
-    volumes:
-      - ../laughing-bananza-frontend:/app
-      - /app/node_modules
+      - postgres-user
+      - redis
     networks:
-      - bananza-network 
+      - bananza-network
+    volumes:
+      - ./services/user-service:/app
+    command: python manage.py runserver 0.0.0.0:8001
+
+  # Post Service
+  post-service:
+    build:
+      context: ./services/post-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - DEBUG=True
+      - DB_NAME=post_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-post
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - MODERATION_SERVICE_URL=http://moderation-service:8005
+      - MEDIA_SERVICE_URL=http://media-service:8003
+    depends_on:
+      - postgres-post
+      - redis
+      - user-service
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/post-service:/app
+    command: python manage.py runserver 0.0.0.0:8002
+
+  # Media Service
+  media-service:
+    build:
+      context: ./services/media-service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - DEBUG=True
+      - DB_NAME=media_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-media
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8001
+    depends_on:
+      - postgres-media
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/media-service:/app
+      - media-files:/app/media
+    command: python manage.py runserver 0.0.0.0:8003
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - DEBUG=True
+      - DB_NAME=notification_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-notification
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8001
+      - POST_SERVICE_URL=http://post-service:8002
+      - EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+      - SITE_URL=http://localhost:8000
+    depends_on:
+      - postgres-notification
+      - redis
+      - user-service
+      - post-service
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/notification-service:/app
+    command: python manage.py runserver 0.0.0.0:8004
+
+  # Moderation Service
+  moderation-service:
+    build:
+      context: ./services/moderation-service
+      dockerfile: Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - DEBUG=True
+      - DB_NAME=moderation_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-moderation
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - POST_SERVICE_URL=http://post-service:8002
+    depends_on:
+      - postgres-moderation
+      - redis
+      - post-service
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/moderation-service:/app
+    command: python manage.py runserver 0.0.0.0:8005
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - USER_SERVICE_URL=http://user-service:8001
+      - POST_SERVICE_URL=http://post-service:8002
+      - MEDIA_SERVICE_URL=http://media-service:8003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - MODERATION_SERVICE_URL=http://moderation-service:8005
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000
+    depends_on:
+      - user-service
+      - post-service
+      - media-service
+      - notification-service
+      - moderation-service
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/api-gateway:/app
+    command: python manage.py runserver 0.0.0.0:8000
+
+  # Celery Workers
+  user-service-worker:
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DB_NAME=user_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-user
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - postgres-user
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/user-service:/app
+    command: celery -A user_service worker --loglevel=info
+
+  post-service-worker:
+    build:
+      context: ./services/post-service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DB_NAME=post_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-post
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8001
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - MODERATION_SERVICE_URL=http://moderation-service:8005
+    depends_on:
+      - postgres-post
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/post-service:/app
+    command: celery -A post_service worker --loglevel=info
+
+  media-service-worker:
+    build:
+      context: ./services/media-service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DB_NAME=media_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-media
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - postgres-media
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/media-service:/app
+      - media-files:/app/media
+    command: celery -A media_service worker --loglevel=info
+
+  notification-service-worker:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DB_NAME=notification_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-notification
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - USER_SERVICE_URL=http://user-service:8001
+      - POST_SERVICE_URL=http://post-service:8002
+    depends_on:
+      - postgres-notification
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/notification-service:/app
+    command: celery -A notification_service worker --loglevel=info
+
+  moderation-service-worker:
+    build:
+      context: ./services/moderation-service
+      dockerfile: Dockerfile
+    environment:
+      - DEBUG=True
+      - DB_NAME=moderation_service_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres-moderation
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - POST_SERVICE_URL=http://post-service:8002
+    depends_on:
+      - postgres-moderation
+      - redis
+    networks:
+      - bananza-network
+    volumes:
+      - ./services/moderation-service:/app
+    command: celery -A moderation_service worker --loglevel=info
+
+  # Frontend (раскомментируйте, когда создадите репозиторий фронтенда)
+  # frontend:
+  #   build:
+  #     context: ../laughing-bananza-frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8000/api
+  #   depends_on:
+  #     - api-gateway
+  #   volumes:
+  #     - ../laughing-bananza-frontend:/app
+  #     - /app/node_modules
+  #   networks:
+  #     - bananza-network
+
+networks:
+  bananza-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-user-data:
+  postgres-post-data:
+  postgres-media-data:
+  postgres-notification-data:
+  postgres-moderation-data:
+  media-files:
