@@ -164,7 +164,6 @@ DEFAULT_FROM_EMAIL=noreply@socialnetwork.com
 
 ## Production
 
-Для production рекомендуется:
 
 1. Использовать PostgreSQL вместо SQLite
 2. Настроить правильные `ALLOWED_HOSTS`
