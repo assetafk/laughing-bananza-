@@ -1,0 +1,18 @@
+services:
+  # ... существующие сервисы бэкенда ...
+  
+  frontend:
+    build:
+      context: ../laughing-bananza-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://api-gateway:8080/api
+    depends_on:
+      - api-gateway
+    volumes:
+      - ../laughing-bananza-frontend:/app
+      - /app/node_modules
+    networks:
+      - bananza-network 

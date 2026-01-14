@@ -57,3 +57,13 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = UserSerializer(user)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    def search(self, request):
+        """Поиск пользователей по username"""
+        username = request.query_params.get('username')
+        if username:
+            users = User.objects.filter(username__icontains=username)[:10]
+            serializer = self.get_serializer(users, many=True)
+            return Response(serializer.data)
+        return Response([])
+

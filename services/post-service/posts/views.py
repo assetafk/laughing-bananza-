@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.exceptions import PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Post, Comment
@@ -43,10 +44,13 @@ class PostViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Создание поста с автором из токена"""
         # Получаем user_id из JWT токена
-        user_id = self.request.user.id if hasattr(self.request, 'user') and self.request.user.is_authenticated else None
-        if not user_id:
-            # Если нет в токене, пытаемся получить из заголовка
+        if hasattr(self.request, 'user') and self.request.user.is_authenticated:
+            user_id = self.request.user.id
+        else:
+            # Пытаемся получить из заголовка (для межсервисной коммуникации)
             user_id = self.request.META.get('HTTP_X_USER_ID')
+            if not user_id:
+                raise PermissionDenied("User ID required")
         
         post = serializer.save(author_id=user_id)
         # Запускаем обработку упоминаний
@@ -61,7 +65,13 @@ class PostViewSet(viewsets.ModelViewSet):
         post = self.get_object()
         serializer = CommentSerializer(data=request.data)
         if serializer.is_valid():
-            user_id = request.user.id if hasattr(request, 'user') else request.META.get('HTTP_X_USER_ID')
+            if hasattr(request, 'user') and request.user.is_authenticated:
+                user_id = request.user.id
+            else:
+                user_id = request.META.get('HTTP_X_USER_ID')
+                if not user_id:
+                    raise PermissionDenied("User ID required")
+            
             comment = serializer.save(post=post, author_id=user_id)
             # Запускаем обработку упоминаний
             if comment.text:
