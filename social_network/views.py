@@ -12,4 +12,5 @@ def home(request):
     else:
         # Для неавторизованных - приветственная страница
         return render(request, 'social_network/welcome.html')
+    print('Home page loaded')
 
